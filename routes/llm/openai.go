@@ -30,29 +30,36 @@ func init() {
 
 // CompletionRequest represents the request body for the completions endpoint
 type CompletionRequest struct {
-	Model       string       `json:"model"`
-	Prompt      any          `json:"prompt"` // string or []string
-	MaxTokens   int          `json:"max_tokens"`
-	Temperature float64      `json:"temperature"`
-	N           int          `json:"n"`
-	Stream      bool         `json:"stream"`
-	Stop        any          `json:"stop"` // string or []string
-	User        string       `json:"user"`
-	Suffix      string       `json:"suffix"`
-	Httpbun     *HttpbunMock `json:"httpbun,omitempty"`
+	Model         string         `json:"model"`
+	Prompt        any            `json:"prompt"` // string or []string
+	MaxTokens     int            `json:"max_tokens"`
+	Temperature   float64        `json:"temperature"`
+	N             int            `json:"n"`
+	Stream        bool           `json:"stream"`
+	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
+	Stop          any            `json:"stop"` // string or []string
+	User          string         `json:"user"`
+	Suffix        string         `json:"suffix"`
+	Httpbun       *HttpbunMock   `json:"httpbun,omitempty"`
 }
 
 // ChatCompletionRequest represents the request body for the chat completions endpoint
 type ChatCompletionRequest struct {
-	Model       string        `json:"model"`
-	Messages    []ChatMessage `json:"messages"`
-	MaxTokens   int           `json:"max_tokens"`
-	Temperature float64       `json:"temperature"`
-	N           int           `json:"n"`
-	Stream      bool          `json:"stream"`
-	Stop        any           `json:"stop"`
-	User        string        `json:"user"`
-	Httpbun     *HttpbunMock  `json:"httpbun,omitempty"`
+	Model         string         `json:"model"`
+	Messages      []ChatMessage  `json:"messages"`
+	MaxTokens     int            `json:"max_tokens"`
+	Temperature   float64        `json:"temperature"`
+	N             int            `json:"n"`
+	Stream        bool           `json:"stream"`
+	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
+	Stop          any            `json:"stop"`
+	User          string         `json:"user"`
+	Httpbun       *HttpbunMock   `json:"httpbun,omitempty"`
+}
+
+// StreamOptions represents the OpenAI stream_options request parameter.
+type StreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type ResponsesRequest struct {
@@ -402,6 +409,7 @@ func streamCompletionResponse(req CompletionRequest, mockText string, promptToke
 		Writer: func(w response.BodyWriter) {
 			chunks := splitIntoChunks(mockText)
 			completionID := "cmpl-" + util.RandomString()[:24]
+			includeUsage := req.StreamOptions != nil && req.StreamOptions.IncludeUsage
 
 			for _, text := range chunks {
 
@@ -418,6 +426,9 @@ func streamCompletionResponse(req CompletionRequest, mockText string, promptToke
 							"finish_reason": nil,
 						},
 					},
+				}
+				if includeUsage {
+					chunk["usage"] = nil
 				}
 
 				data, _ := json.Marshal(chunk)
@@ -442,8 +453,31 @@ func streamCompletionResponse(req CompletionRequest, mockText string, promptToke
 					},
 				},
 			}
+			if includeUsage {
+				finalChunk["usage"] = nil
+			}
 			data, _ := json.Marshal(finalChunk)
 			w.Write("data: " + string(data) + "\n\n")
+
+			// With include_usage, send one extra chunk with the request's usage and empty choices, as the OpenAI API
+			// does. See https://platform.openai.com/docs/api-reference/completions/stream.
+			if includeUsage {
+				completionTokens := estimateTokens(mockText)
+				usageChunk := map[string]any{
+					"id":      completionID,
+					"object":  "text_completion",
+					"created": time.Now().Unix(),
+					"model":   req.Model,
+					"choices": []any{},
+					"usage": map[string]any{
+						"prompt_tokens":     promptTokens,
+						"completion_tokens": completionTokens,
+						"total_tokens":      promptTokens + completionTokens,
+					},
+				}
+				data, _ = json.Marshal(usageChunk)
+				w.Write("data: " + string(data) + "\n\n")
+			}
 			w.Write("data: [DONE]\n\n")
 		},
 	}
@@ -458,6 +492,7 @@ func streamChatCompletionResponse(req ChatCompletionRequest, mockContent string,
 		Writer: func(w response.BodyWriter) {
 			chunks := splitIntoChunks(mockContent)
 			completionID := "chatcmpl-" + util.RandomString()[:24]
+			includeUsage := req.StreamOptions != nil && req.StreamOptions.IncludeUsage
 
 			// Send initial chunk with role
 			initialChunk := map[string]any{
@@ -474,6 +509,9 @@ func streamChatCompletionResponse(req ChatCompletionRequest, mockContent string,
 						"finish_reason": nil,
 					},
 				},
+			}
+			if includeUsage {
+				initialChunk["usage"] = nil
 			}
 			data, _ := json.Marshal(initialChunk)
 			w.Write("data: " + string(data) + "\n\n")
@@ -499,6 +537,9 @@ func streamChatCompletionResponse(req ChatCompletionRequest, mockContent string,
 						},
 					},
 				}
+				if includeUsage {
+					chunk["usage"] = nil
+				}
 
 				data, _ := json.Marshal(chunk)
 				w.Write("data: " + string(data) + "\n\n")
@@ -521,8 +562,31 @@ func streamChatCompletionResponse(req ChatCompletionRequest, mockContent string,
 					},
 				},
 			}
+			if includeUsage {
+				finalChunk["usage"] = nil
+			}
 			data, _ = json.Marshal(finalChunk)
 			w.Write("data: " + string(data) + "\n\n")
+
+			// With include_usage, send one extra chunk with the request's usage and empty choices, as the OpenAI API
+			// does. See https://platform.openai.com/docs/api-reference/chat/stream.
+			if includeUsage {
+				completionTokens := estimateTokens(mockContent)
+				usageChunk := map[string]any{
+					"id":      completionID,
+					"object":  "chat.completion.chunk",
+					"created": time.Now().Unix(),
+					"model":   req.Model,
+					"choices": []any{},
+					"usage": map[string]any{
+						"prompt_tokens":     promptTokens,
+						"completion_tokens": completionTokens,
+						"total_tokens":      promptTokens + completionTokens,
+					},
+				}
+				data, _ = json.Marshal(usageChunk)
+				w.Write("data: " + string(data) + "\n\n")
+			}
 			w.Write("data: [DONE]\n\n")
 		},
 	}

@@ -318,6 +318,28 @@ def test_openai_streaming_keeps_whitespace(openai_base_url: str):
     assert "".join(chunk.choices[0].delta.content or "" for chunk in stream) == content
 
 
+def test_openai_streaming_include_usage(openai_base_url: str):
+    """With stream_options.include_usage, the stream ends with a usage chunk that has an empty choices array."""
+    client = OpenAI(base_url=openai_base_url, api_key="dummy-key")
+
+    stream = client.chat.completions.create(
+        model="gpt-5-nano",
+        messages=[{"role": "user", "content": "Hello"}],
+        stream=True,
+        stream_options={"include_usage": True},
+    )
+
+    chunks = list(stream)
+    assert all(chunk.usage is None for chunk in chunks[:-1])
+
+    usage_chunk = chunks[-1]
+    assert usage_chunk.choices == []
+    assert usage_chunk.usage is not None
+    assert usage_chunk.usage.prompt_tokens == 3
+    assert usage_chunk.usage.completion_tokens == 29
+    assert usage_chunk.usage.total_tokens == 32
+
+
 def test_openai_content_parts(openai_base_url: str):
     """Test that messages with content as a list of parts are accepted."""
     client = OpenAI(base_url=openai_base_url, api_key="dummy-key")

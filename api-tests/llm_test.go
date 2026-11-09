@@ -191,3 +191,66 @@ func TestLLMStreamLargeContent(t *testing.T) {
 		})
 	}
 }
+
+func TestLLMStreamUsage(t *testing.T) {
+	// With `stream_options.include_usage`, OpenAI-compatible streams send one extra chunk just before [DONE], with an
+	// empty choices array and the usage for the whole request, and a null `usage` on every other chunk. See
+	// https://platform.openai.com/docs/api-reference/chat/stream and
+	// https://platform.openai.com/docs/api-reference/completions/stream.
+	for _, tc := range []struct {
+		path string
+		body string
+	}{
+		{
+			path: "llm/v1/chat/completions",
+			body: `{"stream": true, "messages": [{"role": "user", "content": "Hello"}], "stream_options": {"include_usage": true}}`,
+		},
+		{
+			path: "llm/v1/completions",
+			body: `{"stream": true, "prompt": "Hello", "stream_options": {"include_usage": true}}`,
+		},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			s := assert.New(t)
+			resp, body := ExecRequest(t, R{Method: http.MethodPost, Path: tc.path, Body: tc.body})
+			s.Equal(http.StatusOK, resp.StatusCode)
+
+			var usage map[string]any
+			for _, line := range strings.Split(body, "\n") {
+				data, ok := strings.CutPrefix(line, "data: ")
+				if !ok || data == "[DONE]" {
+					continue
+				}
+				var event map[string]any
+				if !s.NoError(json.Unmarshal([]byte(data), &event)) {
+					return
+				}
+				s.Contains(event, "usage")
+				if u, ok := event["usage"].(map[string]any); ok {
+					usage = u
+					s.Empty(event["choices"], "usage chunk has an empty choices array")
+				}
+			}
+
+			if s.NotNil(usage, "stream ended without a usage chunk") {
+				promptTokens := usage["prompt_tokens"].(float64)
+				completionTokens := usage["completion_tokens"].(float64)
+				s.Greater(promptTokens, float64(0))
+				s.Greater(completionTokens, float64(0))
+				s.Equal(promptTokens+completionTokens, usage["total_tokens"])
+			}
+		})
+	}
+
+	// Without include_usage, no chunk carries usage.
+	for _, tc := range []struct{ path, body string }{
+		{"llm/v1/chat/completions", `{"stream": true, "messages": [{"role": "user", "content": "Hello"}]}`},
+		{"llm/v1/completions", `{"stream": true, "prompt": "Hello"}`},
+	} {
+		t.Run(tc.path+" without include_usage", func(t *testing.T) {
+			resp, body := ExecRequest(t, R{Method: http.MethodPost, Path: tc.path, Body: tc.body})
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+			assert.NotContains(t, body, `"usage"`, "usage is only sent when explicitly asked for")
+		})
+	}
+}

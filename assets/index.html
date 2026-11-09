@@ -446,8 +446,10 @@ Hosted versions:
 	<dt id=llm-chat-completions>/llm/v1/chat/completions</dt>
 	<dd>Implements the OpenAI <a href="https://platform.openai.com/docs/api-reference/chat">Chat Completions API</a>.
 		Accepts <code>model</code>, <code>messages</code>, <code>max_tokens</code>, <code>temperature</code>,
-		<code>n</code>, <code>stream</code>, <code>stop</code>, <code>user</code>, and returns a
-		<code>chat.completion</code> response.
+		<code>n</code>, <code>stream</code>, <code>stream_options</code>, <code>stop</code>, <code>user</code>, and
+		returns a <code>chat.completion</code> response. With
+		<code>stream_options: {"include_usage": true}</code>, the stream ends with an extra chunk carrying the request's
+		<code>usage</code> and an empty <code>choices</code> array, just before <code>data: [DONE]</code>.
 		<details>
 			<summary><span>Examples</span></summary>
 			<pre># Basic request
@@ -483,8 +485,10 @@ print(response.choices[0].message.content)
 	<dt id=llm-completions>/llm/v1/completions</dt>
 	<dd>Implements the OpenAI legacy <a href="https://platform.openai.com/docs/api-reference/completions">Completions
 		API</a>. Accepts <code>model</code>, <code>prompt</code> (string or list), <code>max_tokens</code>,
-		<code>temperature</code>, <code>n</code>, <code>stream</code>, <code>stop</code>, <code>user</code>,
-		<code>suffix</code>, and returns a <code>text_completion</code> response.
+		<code>temperature</code>, <code>n</code>, <code>stream</code>, <code>stream_options</code>, <code>stop</code>,
+		<code>user</code>, <code>suffix</code>, and returns a <code>text_completion</code> response. With
+		<code>stream_options: {"include_usage": true}</code>, the stream ends with an extra chunk carrying the request's
+		<code>usage</code> and an empty <code>choices</code> array, just before <code>data: [DONE]</code>.
 		<details>
 			<summary><span>Example</span></summary>
 			<pre>curl -X POST {{.host}}/llm/v1/completions \
